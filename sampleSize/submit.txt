@@ -1,0 +1,17 @@
+#!/bin/bash
+#PBS -N rstan-logcoef
+#PBS -l select=1:ncpus=50:mem=800gb
+#PBS -l walltime=10:00:00
+#PBS -j oe
+#PBS -o runninglog.txt
+#PBS -P personal-huangxy
+#PBS -q normal
+
+#cd $PBS_O_WORKDIR
+
+module load miniforge3
+conda activate myRenv
+
+Rscript NeCTAR/sampleSize/sampleSizeSimu.R
+#Rscript multistateModel/rstanMSM/dataSim.R
+#Rscript multistateModel/rstanMSM/dataGen.R

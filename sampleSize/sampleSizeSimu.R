@@ -1,7 +1,7 @@
 #### Sample size calculation ####
 # Preparation ----
 rm(list = ls())
-# setwd('D:/github')
+# setwd('D:/NUS Dropbox/Xiangyuan Huang/github/')
 setwd('NeCTAR/sampleSize')
 
 
@@ -16,14 +16,10 @@ library(tidyverse)
 
 
 # Different scenarios ----
-# N <- (1:20)*50
-# p1 <- c(3:10)/20
-# delta <- c(1:15)/100
-
-N <- c(3:7)*100 + 50
-p1 <- c(1:5)*0.1
-delta <- c(2:6)/40
-n_sampling <- 500   # number of sampling in estimation
+N <- 400 + (1:8)*25
+p1 <- c(0.3, 0.35, 0.4)
+delta <- c(0.05, 0.06, 0.08, 0.1)
+n_sampling <- 1000   # number of sampling in estimation
 
 
 
@@ -34,8 +30,6 @@ recruitSim <- function(N = N[1], p1 = p1[1], delta = delta[1]){
   comp <- runif(n_block, min = 0, max = 1)
   comp <- comp/sum(comp)
   block <- sample(1:n_block, N, replace = T, prob = comp)
-  # block <- sample(1:10)
-  # block <- rbinom(N, 10, 2:8/10) + 1
   block <- data.frame(block = block) 
   block %<>% arrange(block) %>%
     group_by(block) %>%
@@ -57,16 +51,19 @@ func <- function(index = index, scenario = scenario){
                         p1 = scenario$p1[i],
                         delta = scenario$delta[i])
     
-    fit <- brm(data = dfSim,
-               outcome ~ allocation,
-               family  = bernoulli(link = "logit"),
-               prior = prior(normal(0, 10), class = b),
-               chains = 4,
-               cores = 4)
+    # fit <- brm(data = dfSim,
+    #            outcome ~ allocation,
+    #            family  = bernoulli(link = "logit"),
+    #            prior = prior(normal(0, 10), class = b),
+    #            chains = 4, cores = 4) 
+    #            # file = "model_cache", save_model = "model.stan")
+    fit <- update(fit0, newdata = dfSim)
+    rm(list = 'dfSim')
 
-    coef <- fixef(fit)
-    scenario[i, c('est', 's.e.', 'QL', 'QU')] <- coef[2,]
+    coef <- fixef(fit, probs = c(0.025, 0.9, 0.95, 0.975))
+    scenario[i, c('est', 's.e.', 'q025', 'q900', 'q950', 'q975')] <- coef[2,]
     scenario$index <- index
+    rm(list = c('fit'))
   }
   return(scenario)
 }
@@ -84,34 +81,57 @@ blockList <- read.csv('blockList.csv') %>%
 
 # Loop ----
 scenario <- expand.grid(N = N, p1 = p1, delta = delta)
-scenario <- scenario %>% filter(p1 == 0.4)
+# scenario <- scenario[1:3, ]
 index <- split(1:n_sampling, 1:n_sampling)
 
-cl <- makeCluster(50)
-clusterExport(cl, c('recruitSim', 'blockList'))
+dfSim <- data.frame(outcome = c(0,1), allocation = c(0,1))
+fit0 <- brm(data = dfSim,
+           outcome ~ allocation,
+           family  = bernoulli(link = "logit"),
+           prior = prior(normal(0, 10), class = b),
+           chains = 0) 
+
+cl <- makeCluster(10)
+clusterExport(cl, c('recruitSim', 'blockList', 'fit0'))
 clusterEvalQ(cl, {
   library(dplyr)
   library(magrittr)
   library(brms)})
+
+objs <- ls()
+sapply(objs, function(x) object.size(get(x)))
+
 results <- parLapply(cl, index, func, scenario = scenario)
+
+objs <- ls()
+sapply(objs, function(x) object.size(get(x)))
+
 stopCluster(cl)
 
 combined <- do.call(rbind, results)
-write.csv(combined, 'result/repeat500.csv', row.names = F)
+write.csv(combined, 'result/repeat.csv', row.names = F)
 
 q()
 
 
 
 # Result summary ----
-combined <- read.csv('result/repeat1.csv')
+result1 <- read.csv('result/repeat100a.csv')
+result2 <- read.csv('result/repeat100b.csv') %>%
+  mutate(index = index + 100)
+# result <- read.csv('result/repeat.csv')
+
+result1 <- read.csv('result/repeat0930.csv')
+result2 <- read.csv('result/repeat.csv')
+
+result <- rbind(result1, result2)
 
 
 
 # Summarise ----
-stat <- combined %>% group_by(N, p1, delta) %>%
+stat <- result %>% group_by(N, p1, delta) %>%
   summarize(count = n(), mean = mean(est), 
-            pass = sum(QU < 0)) %>%
+            pass = sum(q950 < 0)) %>%
   mutate(beta = pass/count,
          group = as.character(p1),
          delta = as.character(delta))
@@ -121,10 +141,13 @@ stat <- combined %>% group_by(N, p1, delta) %>%
 # plot ----
 pic <- stat %>% #filter(delta == 0.1) %>%
   ggplot(data = ., aes(x = N, y = beta, group = p1)) +
+  geom_point() +
   # geom_line(aes(col = group))
-  geom_smooth(aes(col = group)) + 
+  geom_smooth(aes(col = group), se = F) + 
   facet_wrap(vars(delta), nrow = 2)
 pic
+
+ggsave('power.tiff', dpi = 300, width = 12, height = 8)
   
 
 
